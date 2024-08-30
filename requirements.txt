@@ -1,0 +1,2 @@
+openai_whisper==20231117
+textblob==0.17.1
