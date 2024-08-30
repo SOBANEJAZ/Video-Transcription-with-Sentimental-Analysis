@@ -1,7 +1,17 @@
 # Audio Transcription and Sentiment Analysis
 
-This project transcribes audio files into text and then performs sentiment analysis on the transcriptions. The resulting text is divided into sentences, and each sentence is analyzed to determine its sentiment (positive, neutral, or negative).
-The results are shared in two JSON file. The first JSON file contains the transcription of each word with its timestamps and the second JSON file contains each sentence and its sentimental analysis.
+## Overview
+
+This GitHub repository contains a script that uses OpenAI’s Whisper model for transcription and TextBlob for sentiment analysis. The script performs the following tasks:
+
+- **Transcription**: Transcribes audio from a video file, extracting words with their corresponding timestamps using the Whisper model. The transcriptions are saved in a JSON file with word-level timestamp information.
+
+- **Sentence Formation**: Processes the transcriptions to reconstruct sentences based on punctuation marks that typically end sentences.
+
+- **Sentiment Analysis**: Analyzes each reconstructed sentence for sentiment using TextBlob. Sentiment is categorized as positive, negative, or neutral based on polarity.
+
+- **Output**: Saves the results, including each sentence with its timestamp and sentiment score, in a JSON file.
+
 >  Given the computational intensity of this task, here is the link to the Google Colab notebook to test the code in real time:
 > [Google Colab Notebook](https://colab.research.google.com/drive/1nswmb47_jL-2DayXuV5qlEUOUCD5n9y4?usp=sharing) 
 
