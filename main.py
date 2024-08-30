@@ -1,156 +1,80 @@
-import json
-import os
-import speech_recognition as sr
-from pydub import AudioSegment
 from textblob import TextBlob
-from tqdm import tqdm
-import moviepy.editor as mp
-import nltk
-from nltk.tokenize import sent_tokenize
+import whisper
+import json
+
+# 
+path_to_file = "path_to_file.mp4"
+# path_to_file = "/content/drive/MyDrive/input.mp4"
 
 
-def download_nltk_data():
-    try:
-        nltk.data.find("tokenizers/punkt")
-        nltk.data.find("tokenizers/punkt_tab")
-    except LookupError:
-        print("Downloading necessary NLTK data...")
-        nltk.download("punkt", quiet=True)
-        nltk.download("punkt_tab", quiet=True)
+# Define the model size
+model_size = "base"
+
+# Load the Whisper model
+model = whisper.load_model(model_size)
+
+# Transcribe the audio file
+result = model.transcribe(path_to_file, word_timestamps=True)
+
+# Extract the words and their timestamps
+words_with_timestamps = []
+for segment in result["segments"]:
+    for word in segment["words"]:
+        words_with_timestamps.append({"word": word["word"], "timestamp": word["start"]})
+
+# Save the result as a JSON file
+import json
+
+with open("transcription_with_timestamps.json", "w") as f:
+    json.dump(words_with_timestamps, f, indent=4)
 
 
-# Call this function at the start of the script
-download_nltk_data()
+# Example JSON file with words and timestamps
+with open("transcription_with_timestamps.json", "r") as f:
+    words_with_timestamps = json.load(f)
 
+sentences = []
+current_sentence = {"sentence": "", "timestamp": 0}
 
-def extract_audio_from_video(video_file):
-    # Extract audio from video
-    video = mp.VideoFileClip(video_file)
-    audio = video.audio
-    audio_file = "temp_audio.wav"
-    audio.write_audiofile(audio_file)
-    return audio_file
+# Define punctuation that marks the end of a sentence
+sentence_endings = [".", "!", "?"]
 
+for word_info in words_with_timestamps:
+    word = word_info["word"]
+    if current_sentence["sentence"] == "":
+        current_sentence["timestamp"] = word_info["timestamp"]
 
-def transcribe_audio(audio_file):
-    # Initialize recognizer
-    r = sr.Recognizer()
+    current_sentence["sentence"] += word + " "
 
-    # Load audio file
-    audio = AudioSegment.from_wav(audio_file)
+    if any(word.endswith(punct) for punct in sentence_endings):
+        # Trim the last space and add the sentence to the list
+        current_sentence["sentence"] = current_sentence["sentence"].strip()
+        sentences.append(current_sentence)
+        current_sentence = {"sentence": "", "timestamp": 0}
 
-    # Split audio into chunks for processing
-    chunk_length_ms = 30000  # 30 seconds
-    chunks = [
-        audio[i : i + chunk_length_ms] for i in range(0, len(audio), chunk_length_ms)
-    ]
+# Analyze sentiment and rate
+analyzed_sentences = []
+for sentence_info in sentences:
+    sentence_text = sentence_info["sentence"]
+    blob = TextBlob(sentence_text)
+    polarity = blob.sentiment.polarity
 
-    transcription = []
-
-    for i, chunk in enumerate(tqdm(chunks)):
-        # Export chunk to a temporary file
-        chunk.export(f"temp_chunk_{i}.wav", format="wav")
-
-        # Transcribe chunk
-        with sr.AudioFile(f"temp_chunk_{i}.wav") as source:
-            audio_data = r.record(source)
-            try:
-                text = r.recognize_google(audio_data, show_all=True)
-                if text and "alternative" in text:
-                    for alt in text["alternative"]:
-                        words = alt["transcript"].split()
-                        for word in words:
-                            timestamp = (
-                                i * chunk_length_ms / 1000 + len(transcription) * 0.5
-                            )  # Rough estimate
-                            transcription.append(
-                                {"word": word, "timestamp": format_timestamp(timestamp)}
-                            )
-            except sr.UnknownValueError:
-                print(f"Could not understand audio in chunk {i}")
-            except sr.RequestError as e:
-                print(f"Could not request results from speech recognition service; {e}")
-
-        # Clean up temporary chunk file
-        os.remove(f"temp_chunk_{i}.wav")
-
-    return transcription
-
-
-def format_timestamp(seconds):
-    hours, remainder = divmod(seconds, 3600)
-    minutes, seconds = divmod(remainder, 60)
-    return f"{int(hours):02d}:{int(minutes):02d}:{int(seconds):02d}:{int((seconds % 1) * 1000):03d}"
-
-
-def perform_sentiment_analysis(text):
-    blob = TextBlob(text)
-    sentiment_score = blob.sentiment.polarity
-
-    # Categorize sentiment
-    if sentiment_score > 0.05:
-        sentiment = "positive"
-    elif sentiment_score < -0.05:
-        sentiment = "negative"
+    # Categorize the sentiment
+    if polarity > 0:
+        sentiment = 1  # Positive
+    elif polarity < 0:
+        sentiment = -1  # Negative
     else:
-        sentiment = "neutral"
+        sentiment = 0  # Neutral
 
-    return {"sentiment": sentiment, "score": sentiment_score}
+    analyzed_sentences.append(
+        {
+            "sentence": sentence_text,
+            "timestamp": sentence_info["timestamp"],
+            "sentiment": sentiment,
+        }
+    )
 
-
-def process_podcast(video_file):
-    # Extract audio from video
-    audio_file = extract_audio_from_video(video_file)
-
-    # Transcribe audio
-    transcription = transcribe_audio(audio_file)
-
-    # Combine words into full text
-    full_text = " ".join([item["word"] for item in transcription])
-
-    # Split text into sentences
-    sentences = sent_tokenize(full_text)
-
-    # Perform sentiment analysis on each sentence
-    analyzed_sentences = []
-    current_word_index = 0
-
-    for sentence in sentences:
-        words_in_sentence = sentence.split()
-        start_time = transcription[current_word_index]["timestamp"]
-        end_time = transcription[current_word_index + len(words_in_sentence) - 1][
-            "timestamp"
-        ]
-
-        sentiment = perform_sentiment_analysis(sentence)
-
-        analyzed_sentences.append(
-            {
-                "text": sentence,
-                "sentiment": sentiment["sentiment"],
-                "sentiment_score": sentiment["score"],
-                "start_time": start_time,
-                "end_time": end_time,
-            }
-        )
-
-        current_word_index += len(words_in_sentence)
-
-    # Prepare final output
-    output = {"transcription": transcription, "sentences": analyzed_sentences}
-
-    # Save to JSON file
-    output_file = os.path.splitext(video_file)[0] + "_analysis.json"
-    with open(output_file, "w") as f:
-        json.dump(output, f, indent=2)
-
-    print(f"Transcription and analysis complete. Results saved to {output_file}")
-
-    # Clean up temporary audio file
-    os.remove(audio_file)
-
-
-# Usage
-if __name__ == "__main__":
-    video_file = "input.mp4"
-    process_podcast(video_file)
+# Save the result as a JSON file
+with open("sentiment_analysis.json", "w") as f:
+    json.dump(analyzed_sentences, f, indent=4)
